@@ -8,7 +8,17 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
-import { ArrowLeft, FileText, BookOpen, Upload, Plus, X } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ArrowLeft, FileText, BookOpen, Upload, Plus, X, Trash2, Eye } from "lucide-react";
 import DocumentUploadModal from "@/components/dashboard/DocumentUploadModal";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -61,6 +71,9 @@ const DepartmentEmployees = () => {
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [assignTrainingOpen, setAssignTrainingOpen] = useState(false);
   const [selectedTrainingId, setSelectedTrainingId] = useState<string>("");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (employeeId) loadEmployeeData();
@@ -133,6 +146,57 @@ const DepartmentEmployees = () => {
     }
   };
 
+  const handleDeleteDocument = (doc: Document) => {
+    setDocumentToDelete(doc);
+    setDeleteDialogOpen(true);
+  };
+
+  const deleteDocument = async () => {
+    if (!documentToDelete) return;
+
+    setDeleting(true);
+    try {
+      // Delete from storage if it's not an external URL
+      if (!documentToDelete.file_url.startsWith('http://') && !documentToDelete.file_url.startsWith('https://')) {
+        const { error: storageError } = await supabase.storage
+          .from('employee_docs')
+          .remove([documentToDelete.file_url]);
+
+        if (storageError) {
+          console.warn('Storage deletion failed:', storageError.message);
+          // Continue with database deletion even if storage fails
+        }
+      }
+
+      // Delete from database
+      const { error: dbError } = await supabase
+        .from('documents')
+        .delete()
+        .eq('id', documentToDelete.id);
+
+      if (dbError) throw dbError;
+
+      // Update local state
+      setDocuments(docs => docs.filter(d => d.id !== documentToDelete.id));
+
+      toast({
+        title: "Document deleted successfully",
+        description: "The document has been removed from the employee's account.",
+      });
+
+      setDeleteDialogOpen(false);
+      setDocumentToDelete(null);
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error deleting document",
+        description: error.message,
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (loading || !employee) {
     return <DashboardLayout title="Employee Details" subtitle="Loading..."><div>Loading...</div></DashboardLayout>;
   }
@@ -167,52 +231,64 @@ const DepartmentEmployees = () => {
                         <p className="font-medium">{doc.title}</p>
                         <p className="text-sm text-muted-foreground">{doc.file_name}</p>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={async () => {
-                          try {
-                            // Check if it's an external URL
-                            if (doc.file_url.startsWith('http://') || doc.file_url.startsWith('https://')) {
-                              // Check if it's a Supabase storage public URL (old documents)
-                              if (doc.file_url.includes('supabase.co/storage')) {
-                                const urlParts = doc.file_url.split('/storage/v1/object/public/');
-                                if (urlParts.length > 1) {
-                                  const [bucket, ...pathParts] = urlParts[1].split('/');
-                                  const filePath = pathParts.join('/');
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={async () => {
+                            try {
+                              // Check if it's an external URL
+                              if (doc.file_url.startsWith('http://') || doc.file_url.startsWith('https://')) {
+                                // Check if it's a Supabase storage public URL (old documents)
+                                if (doc.file_url.includes('supabase.co/storage')) {
+                                  const urlParts = doc.file_url.split('/storage/v1/object/public/');
+                                  if (urlParts.length > 1) {
+                                    const [bucket, ...pathParts] = urlParts[1].split('/');
+                                    const filePath = pathParts.join('/');
 
-                                  const { data, error } = await supabase.storage
-                                    .from(bucket)
-                                    .createSignedUrl(filePath, 3600);
+                                    const { data, error } = await supabase.storage
+                                      .from(bucket)
+                                      .createSignedUrl(filePath, 3600);
 
-                                  if (error) throw error;
-                                  if (data?.signedUrl) {
-                                    // signedUrl is already a full URL from createSignedUrl
-                                    const fullUrl = data.signedUrl.startsWith('http')
-                                      ? data.signedUrl
-                                      : `${import.meta.env.VITE_SUPABASE_URL}${data.signedUrl}`;
-                                    window.open(fullUrl, "_blank");
-                                    return;
+                                    if (error) throw error;
+                                    if (data?.signedUrl) {
+                                      // signedUrl is already a full URL from createSignedUrl
+                                      const fullUrl = data.signedUrl.startsWith('http')
+                                        ? data.signedUrl
+                                        : `${import.meta.env.VITE_SUPABASE_URL}${data.signedUrl}`;
+                                      window.open(fullUrl, "_blank");
+                                      return;
+                                    }
                                   }
                                 }
+                                window.open(doc.file_url, "_blank");
+                              } else {
+                                const { data, error } = await supabase.storage
+                                  .from('employee_docs')
+                                  .createSignedUrl(doc.file_url, 3600);
+                                if (error) throw error;
+                                if (data?.signedUrl) {
+                                  window.open(data.signedUrl, "_blank");
+                                }
                               }
-                              window.open(doc.file_url, "_blank");
-                            } else {
-                              const { data, error } = await supabase.storage
-                                .from('employee_docs')
-                                .createSignedUrl(doc.file_url, 3600);
-                              if (error) throw error;
-                              if (data?.signedUrl) {
-                                window.open(data.signedUrl, "_blank");
-                              }
+                            } catch (error: any) {
+                              toast({ variant: "destructive", title: "Error", description: error.message });
                             }
-                          } catch (error: any) {
-                            toast({ variant: "destructive", title: "Error", description: error.message });
-                          }
-                        }}
-                      >
-                        View
-                      </Button>
+                          }}
+                        >
+                          <Eye className="w-3 h-3 mr-1" />
+                          View
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDeleteDocument(doc)}
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="w-3 h-3 mr-1" />
+                          Delete
+                        </Button>
+                      </div>
                     </CardContent>
                   </Card>
                 ))
@@ -296,6 +372,28 @@ const DepartmentEmployees = () => {
       </div>
 
       <DocumentUploadModal open={uploadModalOpen} onOpenChange={setUploadModalOpen} onUploadComplete={loadEmployeeData} targetUserId={employeeId} isAdminUpload />
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure you want to delete this document?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete "{documentToDelete?.title}"
+              and remove it from the employee's account.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={deleteDocument}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 };

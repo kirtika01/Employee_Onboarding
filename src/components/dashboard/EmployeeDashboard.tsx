@@ -4,10 +4,21 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import DashboardLayout from "./DashboardLayout";
 import UserInfoSidebar from "./UserInfoSidebar";
-import { FileText, GraduationCap, ExternalLink, Play } from "lucide-react";
+import { FileText, GraduationCap, ExternalLink, Play, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface TrainingSession {
   id: string;
@@ -24,6 +35,9 @@ const EmployeeDashboard = () => {
   const [documentCount, setDocumentCount] = useState(0);
   const [trainingSessions, setTrainingSessions] = useState<TrainingSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [sessionToUnassign, setSessionToUnassign] = useState<TrainingSession | null>(null);
+  const [unassigning, setUnassigning] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -40,7 +54,7 @@ const EmployeeDashboard = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Fetch assigned training sessions with progress
+      // Fetch only assigned training sessions with progress
       const { data: sessions, error } = await supabase
         .from("training_sessions")
         .select(`
@@ -50,8 +64,10 @@ const EmployeeDashboard = () => {
           resource_type,
           resource_url,
           is_mandatory,
-          training_progress(progress_percentage)
+          training_progress(progress_percentage),
+          training_assignments!inner(user_id)
         `)
+        .eq("training_assignments.user_id", user.id)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -127,6 +143,49 @@ const EmployeeDashboard = () => {
   const handleSessionClick = async (session: TrainingSession) => {
     if (session.resource_url && session.resource_url !== "#") {
       window.open(session.resource_url, "_blank");
+    }
+  };
+
+  const handleUnassignClick = (e: React.MouseEvent, session: TrainingSession) => {
+    e.stopPropagation(); // Prevent opening the session
+    setSessionToUnassign(session);
+    setDeleteDialogOpen(true);
+  };
+
+  const unassignFromTraining = async () => {
+    if (!sessionToUnassign) return;
+
+    setUnassigning(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { error } = await supabase
+        .from("training_assignments")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("training_session_id", sessionToUnassign.id);
+
+      if (error) throw error;
+
+      // Update local state
+      setTrainingSessions(sessions => sessions.filter(s => s.id !== sessionToUnassign.id));
+
+      toast({
+        title: "Removed from training",
+        description: `You have been removed from "${sessionToUnassign.title}".`,
+      });
+
+      setDeleteDialogOpen(false);
+      setSessionToUnassign(null);
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error removing training",
+        description: error.message,
+      });
+    } finally {
+      setUnassigning(false);
     }
   };
 
@@ -213,7 +272,19 @@ const EmployeeDashboard = () => {
                             {session.description}
                           </p>
                         </div>
-                        <Play className="w-5 h-5 text-primary ml-2" />
+                        <div className="flex items-center gap-2 ml-2">
+                          <Play className="w-5 h-5 text-primary" />
+                          {!session.is_mandatory && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={(e) => handleUnassignClick(e, session)}
+                              className="text-muted-foreground hover:text-destructive p-1 h-auto"
+                            >
+                              <X className="w-4 h-4" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
                       <div className="space-y-1">
                         <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -230,6 +301,28 @@ const EmployeeDashboard = () => {
           </Card>
         </div>
       </div>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove yourself from this training?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to remove yourself from "{sessionToUnassign?.title}"?
+              You can be reassigned to this training later by an admin.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={unassigning}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={unassignFromTraining}
+              disabled={unassigning}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {unassigning ? "Removing..." : "Remove"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 };

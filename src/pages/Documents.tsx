@@ -7,7 +7,17 @@ import DocumentUploadModal from "@/components/dashboard/DocumentUploadModal";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, FileText, ExternalLink, Calendar } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Plus, FileText, ExternalLink, Calendar, Trash2, Eye } from "lucide-react";
 import { format } from "date-fns";
 
 interface Document {
@@ -26,6 +36,9 @@ const Documents = () => {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -116,6 +129,58 @@ const Documents = () => {
     }
   };
 
+  const handleDeleteClick = (e: React.MouseEvent, doc: Document) => {
+    e.stopPropagation(); // Prevent card click
+    setDocumentToDelete(doc);
+    setDeleteDialogOpen(true);
+  };
+
+  const deleteDocument = async () => {
+    if (!documentToDelete) return;
+
+    setDeleting(true);
+    try {
+      // Delete from storage if it's not an external URL
+      if (!documentToDelete.file_url.startsWith('http://') && !documentToDelete.file_url.startsWith('https://')) {
+        const { error: storageError } = await supabase.storage
+          .from('employee_docs')
+          .remove([documentToDelete.file_url]);
+
+        if (storageError) {
+          console.warn('Storage deletion failed:', storageError.message);
+          // Continue with database deletion even if storage fails
+        }
+      }
+
+      // Delete from database
+      const { error: dbError } = await supabase
+        .from('documents')
+        .delete()
+        .eq('id', documentToDelete.id);
+
+      if (dbError) throw dbError;
+
+      // Update local state
+      setDocuments(docs => docs.filter(d => d.id !== documentToDelete.id));
+
+      toast({
+        title: "Document deleted successfully",
+        description: "The document has been removed from your account.",
+      });
+
+      setDeleteDialogOpen(false);
+      setDocumentToDelete(null);
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error deleting document",
+        description: error.message,
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <DashboardLayout
       title="My Documents"
@@ -161,11 +226,7 @@ const Documents = () => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {documents.map((doc) => (
-              <Card
-                key={doc.id}
-                className="hover:shadow-lg transition-shadow cursor-pointer"
-                onClick={() => openDocument(doc)}
-              >
+              <Card key={doc.id} className="hover:shadow-lg transition-shadow">
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <FileText className="w-8 h-8 text-primary" />
@@ -185,11 +246,29 @@ const Documents = () => {
                     <Calendar className="w-3 h-3" />
                     {format(new Date(doc.created_at), "MMM dd, yyyy")}
                   </div>
-                  <div className="flex items-center gap-2 text-xs">
+                  <div className="flex items-center justify-between">
                     <Badge variant="outline" className="text-xs">
                       {doc.status}
                     </Badge>
-                    <ExternalLink className="w-3 h-3 ml-auto" />
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openDocument(doc)}
+                      >
+                        <Eye className="w-3 h-3 mr-1" />
+                        View
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => handleDeleteClick(e, doc)}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="w-3 h-3 mr-1" />
+                        Delete
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -203,6 +282,28 @@ const Documents = () => {
         onOpenChange={setUploadModalOpen}
         onUploadComplete={loadDocuments}
       />
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure you want to delete this document?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete "{documentToDelete?.title}"
+              and remove it from your account.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={deleteDocument}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 };

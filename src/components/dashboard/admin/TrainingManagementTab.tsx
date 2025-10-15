@@ -22,6 +22,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Plus, Trash2, Edit, ExternalLink } from "lucide-react";
 
 interface TrainingSession {
@@ -46,7 +56,10 @@ const TrainingManagementTab = () => {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<TrainingSession | null>(null);
+  const [sessionToDelete, setSessionToDelete] = useState<TrainingSession | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -137,19 +150,34 @@ const TrainingManagementTab = () => {
     }
   };
 
-  const handleDeleteSession = async (id: string) => {
+  const handleDeleteClick = (session: TrainingSession) => {
+    setSessionToDelete(session);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteSession = async () => {
+    if (!sessionToDelete) return;
+
+    setDeleting(true);
     try {
-      const { error } = await supabase.from("training_sessions").delete().eq("id", id);
+      const { error } = await supabase.from("training_sessions").delete().eq("id", sessionToDelete.id);
 
       if (error) throw error;
-      toast({ title: "Session deleted successfully" });
-      loadData();
+
+      // Update local state
+      setSessions(sessions => sessions.filter(s => s.id !== sessionToDelete.id));
+
+      toast({ title: "Training session deleted successfully" });
+      setDeleteDialogOpen(false);
+      setSessionToDelete(null);
     } catch (error: any) {
       toast({
         variant: "destructive",
         title: "Error deleting session",
         description: error.message,
       });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -335,7 +363,7 @@ const TrainingManagementTab = () => {
                   <Button
                     size="sm"
                     variant="destructive"
-                    onClick={() => handleDeleteSession(session.id)}
+                    onClick={() => handleDeleteClick(session)}
                   >
                     <Trash2 className="w-4 h-4" />
                   </Button>
@@ -345,6 +373,28 @@ const TrainingManagementTab = () => {
           </Card>
         ))}
       </div>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure you want to delete this training session?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete "{sessionToDelete?.title}"
+              and remove it from all employees who have been assigned this training.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteSession}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
