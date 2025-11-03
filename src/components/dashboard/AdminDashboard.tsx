@@ -13,6 +13,7 @@ interface Stats {
   totalEmployees: number;
   totalDocuments: number;
   totalTrainingSessions: number;
+  totalTemplates: number;
 }
 
 const AdminDashboard = () => {
@@ -20,6 +21,7 @@ const AdminDashboard = () => {
     totalEmployees: 0,
     totalDocuments: 0,
     totalTrainingSessions: 0,
+    totalTemplates: 0,
   });
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
@@ -30,16 +32,18 @@ const AdminDashboard = () => {
 
   const loadDashboardData = async () => {
     try {
-      const [profilesCount, documentsCount, trainingSessions] = await Promise.all([
+      const [profilesCount, documentsCount, trainingSessions, templatesCount] = await Promise.all([
         supabase.from("profiles").select("*", { count: "exact", head: true }),
         supabase.from("documents").select("*", { count: "exact", head: true }),
         supabase.from("training_sessions").select("*", { count: "exact", head: true }),
+        supabase.from("department_document_templates").select("*", { count: "exact", head: true }),
       ]);
 
       setStats({
         totalEmployees: profilesCount.count || 0,
         totalDocuments: documentsCount.count || 0,
         totalTrainingSessions: trainingSessions.count || 0,
+        totalTemplates: templatesCount.count || 0,
       });
     } catch (error: any) {
       toast({
@@ -82,12 +86,12 @@ const AdminDashboard = () => {
               Employees
             </TabsTrigger>
             <TabsTrigger value="forms">
-              <FileText className="w-4 h-4 mr-2" />
-              Form Management
+              <Building2 className="w-4 h-4 mr-2" />
+              Department Forms
             </TabsTrigger>
             <TabsTrigger value="training">
               <BookOpen className="w-4 h-4 mr-2" />
-              Training Sessions
+              Training
             </TabsTrigger>
           </TabsList>
 

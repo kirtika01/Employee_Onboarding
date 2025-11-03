@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { Upload, Loader2, FileCheck, ArrowLeft } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
+import { Textarea } from "@/components/ui/textarea";
 
 interface Department {
   id: string;
@@ -26,6 +27,7 @@ const Onboarding = () => {
     resume?: File;
   }>({});
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [formFields, setFormFields] = useState<any[]>([]);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -33,6 +35,18 @@ const Onboarding = () => {
     checkAuth();
     loadDepartments();
   }, []);
+
+  useEffect(() => {
+    const fetchFields = async () => {
+      if (selectedDepartment) {
+        const fields = await loadDepartmentFormFields(selectedDepartment);
+        setFormFields(fields);
+      } else {
+        setFormFields([]);
+      }
+    };
+    fetchFields();
+  }, [selectedDepartment]);
 
   const checkAuth = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -47,38 +61,120 @@ const Onboarding = () => {
     if (data) setDepartments(data);
   };
 
-  const getDepartmentFields = (deptName: string) => {
-    switch (deptName) {
-      case "Educators":
-        return ["qualification", "subject", "experience"];
-      case "Sales":
-        return ["targetRegion", "experience", "contactNumber"];
-      case "Marketing":
-        return ["expertiseArea", "portfolioLink"];
-      case "IT":
-        return ["skillset", "githubProfile"];
-      case "Onboarding":
-        return ["joiningDate", "hrReference"];
-      default:
+  const loadDepartmentFormFields = async (departmentId: string) => {
+    try {
+      // Get the department signup form which contains all fields
+      const { data: formData, error: formError } = await supabase
+        .from("department_signup_forms")
+        .select("form_fields")
+        .eq("department_id", departmentId)
+        .single();
+
+      if (formError) {
+        console.error("Error loading department signup form:", formError);
+
+        // Check if the table exists
+        if (formError.message?.includes('does not exist') || formError.code === 'PGRST116') {
+          console.log("Department signup forms table does not exist. Please run the migration.");
+          return [];
+        }
+
         return [];
+      }
+
+      // Return the form fields from the form configuration
+      return (formData?.form_fields as unknown as any[]) || [];
+    } catch (error: any) {
+      console.error("Error loading department form fields:", error);
+      return [];
     }
   };
 
-  const getFieldLabel = (field: string) => {
-    const labels: Record<string, string> = {
-      qualification: "Qualification",
-      subject: "Subject",
-      experience: "Years of Experience",
-      targetRegion: "Target Region",
-      contactNumber: "Contact Number",
-      expertiseArea: "Expertise Area",
-      portfolioLink: "Portfolio Link",
-      skillset: "Skillset",
-      githubProfile: "GitHub/LinkedIn Profile",
-      joiningDate: "Joining Date",
-      hrReference: "HR Reference",
-    };
-    return labels[field] || field;
+  const getFieldComponent = (field: any) => {
+    switch (field.type) {
+      case "text":
+        return (
+          <Input
+            id={field.id}
+            name={field.id}
+            type="text"
+            placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
+            required={field.required}
+          />
+        );
+      case "email":
+        return (
+          <Input
+            id={field.id}
+            name={field.id}
+            type="email"
+            placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
+            required={field.required}
+          />
+        );
+      case "phone":
+        return (
+          <Input
+            id={field.id}
+            name={field.id}
+            type="tel"
+            placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
+            required={field.required}
+          />
+        );
+      case "textarea":
+        return (
+          <Textarea
+            id={field.id}
+            name={field.id}
+            placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
+            required={field.required}
+            rows={3}
+          />
+        );
+      case "dropdown":
+        const options = field.options || [];
+        return (
+          <Select name={field.id} required={field.required}>
+            <SelectTrigger>
+              <SelectValue placeholder={field.placeholder || `Select ${field.label.toLowerCase()}`} />
+            </SelectTrigger>
+            <SelectContent>
+              {options.map((option: string, index: number) => (
+                <SelectItem key={index} value={option}>
+                  {option}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        );
+      case "file":
+        return (
+          <Input
+            id={field.id}
+            type="file"
+            accept={field.fileTypes?.map((type: string) => {
+              if (type === 'pdf') return '.pdf';
+              if (type === 'docx') return '.docx';
+              if (type === 'image') return '.jpg,.jpeg,.png';
+              return '.*';
+            }).join(',') || '.pdf,.jpg,.jpeg,.png,.doc,.docx'}
+            onChange={(e) => handleFileChange(field.id, e.target.files?.[0] || null)}
+            className="cursor-pointer"
+            required={field.required}
+          />
+        );
+      default:
+        return (
+          <Input
+            id={field.id}
+            name={field.id}
+            type="text"
+            placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
+            required={field.required}
+          />
+        );
+    }
   };
 
   const handleFileChange = (documentType: string, file: File | null) => {
@@ -143,7 +239,7 @@ const Onboarding = () => {
 
     const requiredDocs = ['aadhaar_card', 'police_verification', 'offer_letter'];
     const missingDocs = requiredDocs.filter(doc => !documents[doc as keyof typeof documents]);
-    
+
     if (missingDocs.length > 0) {
       toast({
         variant: "destructive",
@@ -158,14 +254,13 @@ const Onboarding = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
-      const selectedDept = departments.find(d => d.id === departmentId);
-      const deptFields = getDepartmentFields(selectedDept?.name || "");
-      const departmentSpecificData: Record<string, string> = {};
-      
-      deptFields.forEach((field) => {
-        const value = formData.get(field) as string;
-        if (value) departmentSpecificData[field] = value;
-      });
+      const departmentSpecificData: Record<string, any> = {};
+      formFields
+        .filter((field) => field.type !== "file")
+        .forEach((field) => {
+          const value = formData.get(field.id) as string;
+          if (value) departmentSpecificData[field.id] = value;
+        });
 
       await uploadDocuments(user.id);
 
@@ -202,9 +297,9 @@ const Onboarding = () => {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-accent/5 p-4">
       <Card className="w-full max-w-2xl shadow-lg border-primary/10 my-8">
         <CardHeader className="space-y-1">
-          <Button 
-            variant="ghost" 
-            size="sm" 
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => navigate("/auth")}
             className="w-fit"
           >
@@ -239,23 +334,20 @@ const Onboarding = () => {
               </Select>
             </div>
 
-            {selectedDepartment && departments.find(d => d.id === selectedDepartment) && (
+            {selectedDepartment && (
               <div className="space-y-4 pt-4 border-t">
                 <h3 className="font-semibold">Department Information</h3>
-                {getDepartmentFields(
-                  departments.find(d => d.id === selectedDepartment)?.name || ""
-                ).map((field) => (
-                  <div key={field} className="space-y-2">
-                    <Label htmlFor={field}>{getFieldLabel(field)}</Label>
-                    <Input
-                      id={field}
-                      name={field}
-                      type={field === "joiningDate" ? "date" : "text"}
-                      placeholder={`Enter ${getFieldLabel(field).toLowerCase()}`}
-                      required
-                    />
-                  </div>
-                ))}
+                {formFields
+                  .filter((field) => field.type !== "file")
+                  .map((field) => (
+                    <div key={field.id} className="space-y-2">
+                      <Label htmlFor={field.id}>
+                        {field.label}
+                        {field.required && <span className="text-red-500 ml-1">*</span>}
+                      </Label>
+                      {getFieldComponent(field)}
+                    </div>
+                  ))}
               </div>
             )}
 
@@ -266,7 +358,7 @@ const Onboarding = () => {
                   {uploadedDocs} of 3 required
                 </span>
               </div>
-              
+
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="aadhaar" className="flex items-center gap-2">
@@ -348,9 +440,9 @@ const Onboarding = () => {
               </div>
             )}
 
-            <Button 
-              type="submit" 
-              className="w-full" 
+            <Button
+              type="submit"
+              className="w-full"
               disabled={loading || !selectedDepartment || uploadedDocs < 3}
             >
               {loading ? (

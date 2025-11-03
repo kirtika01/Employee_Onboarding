@@ -5,294 +5,301 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import DepartmentSignupFormBuilder from "./DepartmentSignupFormBuilder";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Plus, Trash2, Edit } from "lucide-react";
+    Plus,
+    Edit,
+    Trash2,
+    Eye,
+    Building2,
+    FileText
+} from "lucide-react";
 
-interface FormField {
+interface Department {
+    id: string;
+    name: string;
+}
+
+interface DepartmentSignupForm {
   id: string;
-  field_name: string;
-  field_label: string;
-  field_type: string;
-  is_required: boolean;
-  display_order: number;
-  is_active: boolean;
+  department_id: string;
+  form_name: string;
+  form_description?: string;
+  form_fields: any;
+  created_at: string;
+  updated_at: string;
+  departments?: {
+    name: string;
+  };
 }
 
 const FormManagementTab = () => {
-  const [fields, setFields] = useState<FormField[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingField, setEditingField] = useState<FormField | null>(null);
-  const [formData, setFormData] = useState({
-    field_name: "",
-    field_label: "",
-    field_type: "text",
-    is_required: false,
-  });
-  const { toast } = useToast();
+    const [forms, setForms] = useState<DepartmentSignupForm[]>([]);
+    const [departments, setDepartments] = useState<Department[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [isBuilderOpen, setIsBuilderOpen] = useState(false);
+    const [selectedForm, setSelectedForm] = useState<DepartmentSignupForm | null>(null);
+    const [filterDepartment, setFilterDepartment] = useState<string>("all");
+    const { toast } = useToast();
 
-  useEffect(() => {
-    loadFields();
-  }, []);
+    useEffect(() => {
+        loadData();
+    }, []);
 
-  const loadFields = async () => {
-    try {
-      const { data, error } = await supabase
-        .from("form_fields")
-        .select("*")
-        .order("display_order");
+    useEffect(() => {
+        loadForms();
+    }, [filterDepartment]);
 
-      if (error) throw error;
-      setFields(data || []);
-    } catch (error: any) {
-      toast({
-        variant: "destructive",
-        title: "Error loading fields",
-        description: error.message,
-      });
-    } finally {
-      setLoading(false);
+    const loadData = async () => {
+        await Promise.all([
+            loadDepartments(),
+            loadForms()
+        ]);
+        setLoading(false);
+    };
+
+    const loadDepartments = async () => {
+        try {
+            const { data, error } = await supabase
+                .from("departments")
+                .select("*")
+                .order("name");
+
+            if (error) throw error;
+            setDepartments(data || []);
+        } catch (error: any) {
+            toast({
+                variant: "destructive",
+                title: "Error loading departments",
+                description: error.message,
+            });
+        }
+    };
+
+    const loadForms = async () => {
+        try {
+            let query = supabase
+                .from("department_signup_forms")
+                .select(`
+          *,
+          departments (
+            name
+          )
+        `)
+                .order("updated_at", { ascending: false });
+
+            if (filterDepartment !== "all") {
+                query = query.eq("department_id", filterDepartment);
+            }
+
+            const { data, error } = await query;
+
+            if (error) {
+                console.error("Error loading forms:", error);
+
+                // Check if the table exists
+                if (error.message?.includes('does not exist') || error.code === 'PGRST116') {
+                    toast({
+                        variant: "destructive",
+                        title: "Table not found",
+                        description: "The department_signup_forms table does not exist. Please run the database migration.",
+                    });
+                    return;
+                }
+
+                throw error;
+            }
+
+            setForms((data || []).map(form => ({
+              ...form,
+              form_fields: Array.isArray(form.form_fields) ? form.form_fields : []
+            })));
+        } catch (error: any) {
+            toast({
+                variant: "destructive",
+                title: "Error loading forms",
+                description: error.message,
+            });
+        }
+    };
+
+    const deleteForm = async (formId: string) => {
+        if (!confirm("Are you sure you want to delete this form? This action cannot be undone.")) {
+            return;
+        }
+
+        try {
+            const { error } = await supabase
+                .from("department_signup_forms")
+                .delete()
+                .eq("id", formId);
+
+            if (error) throw error;
+
+            toast({
+                title: "Form deleted successfully",
+            });
+
+            await loadForms();
+        } catch (error: any) {
+            toast({
+                variant: "destructive",
+                title: "Error deleting form",
+                description: error.message,
+            });
+        }
+    };
+
+    const editForm = (form: DepartmentSignupForm) => {
+        setSelectedForm(form);
+        setIsBuilderOpen(true);
+    };
+
+    const createNewForm = () => {
+        setSelectedForm(null);
+        setIsBuilderOpen(true);
+    };
+
+    const closeBuilder = () => {
+        setIsBuilderOpen(false);
+        setSelectedForm(null);
+        loadForms();
+    };
+
+    const getDepartmentName = (departmentId: string) => {
+        const dept = departments.find(d => d.id === departmentId);
+        return dept?.name || "Unknown Department";
+    };
+
+    const getFieldCount = (formFields: any[]) => {
+        return formFields?.length || 0;
+    };
+
+    if (loading) {
+        return <div className="text-muted-foreground">Loading forms...</div>;
     }
-  };
 
-  const handleSaveField = async () => {
-    try {
-      if (!formData.field_name || !formData.field_label) {
-        toast({
-          variant: "destructive",
-          title: "Missing fields",
-          description: "Please fill in all required fields",
-        });
-        return;
-      }
-
-      if (editingField) {
-        const { error } = await supabase
-          .from("form_fields")
-          .update({
-            field_name: formData.field_name,
-            field_label: formData.field_label,
-            field_type: formData.field_type,
-            is_required: formData.is_required,
-          })
-          .eq("id", editingField.id);
-
-        if (error) throw error;
-        toast({ title: "Field updated successfully" });
-      } else {
-        const maxOrder = fields.length > 0 ? Math.max(...fields.map((f) => f.display_order)) : 0;
-        const { error } = await supabase.from("form_fields").insert({
-          ...formData,
-          display_order: maxOrder + 1,
-        });
-
-        if (error) throw error;
-        toast({ title: "Field added successfully" });
-      }
-
-      setDialogOpen(false);
-      setEditingField(null);
-      setFormData({
-        field_name: "",
-        field_label: "",
-        field_type: "text",
-        is_required: false,
-      });
-      loadFields();
-    } catch (error: any) {
-      toast({
-        variant: "destructive",
-        title: "Error saving field",
-        description: error.message,
-      });
-    }
-  };
-
-  const handleDeleteField = async (id: string) => {
-    try {
-      const { error } = await supabase.from("form_fields").delete().eq("id", id);
-
-      if (error) throw error;
-      toast({ title: "Field deleted successfully" });
-      loadFields();
-    } catch (error: any) {
-      toast({
-        variant: "destructive",
-        title: "Error deleting field",
-        description: error.message,
-      });
-    }
-  };
-
-  const handleToggleActive = async (id: string, isActive: boolean) => {
-    try {
-      const { error } = await supabase
-        .from("form_fields")
-        .update({ is_active: !isActive })
-        .eq("id", id);
-
-      if (error) throw error;
-      loadFields();
-    } catch (error: any) {
-      toast({
-        variant: "destructive",
-        title: "Error updating field",
-        description: error.message,
-      });
-    }
-  };
-
-  const openEditDialog = (field: FormField) => {
-    setEditingField(field);
-    setFormData({
-      field_name: field.field_name,
-      field_label: field.field_label,
-      field_type: field.field_type,
-      is_required: field.is_required,
-    });
-    setDialogOpen(true);
-  };
-
-  if (loading) {
-    return <div className="text-muted-foreground">Loading form fields...</div>;
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <p className="text-sm text-muted-foreground">
-          Manage onboarding form fields that new employees will see during signup
-        </p>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={() => {
-              setEditingField(null);
-              setFormData({
-                field_name: "",
-                field_label: "",
-                field_type: "text",
-                is_required: false,
-              });
-            }}>
-              <Plus className="w-4 h-4 mr-2" />
-              Add Field
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
-                {editingField ? "Edit Field" : "Add New Field"}
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div>
-                <Label>Field Name (internal)</Label>
-                <Input
-                  placeholder="e.g., aadhaar_card"
-                  value={formData.field_name}
-                  onChange={(e) =>
-                    setFormData({ ...formData, field_name: e.target.value })
-                  }
-                />
-              </div>
-              <div>
-                <Label>Field Label (displayed to users)</Label>
-                <Input
-                  placeholder="e.g., Aadhaar Card"
-                  value={formData.field_label}
-                  onChange={(e) =>
-                    setFormData({ ...formData, field_label: e.target.value })
-                  }
-                />
-              </div>
-              <div>
-                <Label>Field Type</Label>
-                <Select
-                  value={formData.field_type}
-                  onValueChange={(value) =>
-                    setFormData({ ...formData, field_type: value })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="text">Text</SelectItem>
-                    <SelectItem value="file">File Upload</SelectItem>
-                    <SelectItem value="link">Link</SelectItem>
-                    <SelectItem value="textarea">Textarea</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Switch
-                  checked={formData.is_required}
-                  onCheckedChange={(checked) =>
-                    setFormData({ ...formData, is_required: checked })
-                  }
-                />
-                <Label>Required Field</Label>
-              </div>
-              <Button onClick={handleSaveField} className="w-full">
-                {editingField ? "Update Field" : "Add Field"}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4">
-        {fields.map((field) => (
-          <Card key={field.id}>
-            <CardHeader className="pb-3">
-              <div className="flex justify-between items-start">
+    return (
+        <div className="space-y-6">
+            {/* Header */}
+            <div className="flex justify-between items-center">
                 <div>
-                  <CardTitle className="text-base">{field.field_label}</CardTitle>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Type: {field.field_type} | {field.is_required ? "Required" : "Optional"}
-                  </p>
+                    <h2 className="text-2xl font-bold">Department Forms Management</h2>
+                    <p className="text-muted-foreground">Manage signup forms for different departments</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={field.is_active}
-                    onCheckedChange={() => handleToggleActive(field.id, field.is_active)}
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => openEditDialog(field)}
-                  >
-                    <Edit className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => handleDeleteField(field.id)}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
+                <Dialog open={isBuilderOpen} onOpenChange={setIsBuilderOpen}>
+                    <DialogTrigger asChild>
+                        <Button onClick={createNewForm}>
+                            <Plus className="w-4 h-4 mr-2" />
+                            Create New Form
+                        </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+                        <DialogHeader>
+                            <DialogTitle>
+                                {selectedForm ? 'Edit Form' : 'Create New Form'}
+                            </DialogTitle>
+                        </DialogHeader>
+                        <DepartmentSignupFormBuilder />
+                    </DialogContent>
+                </Dialog>
+            </div>
+
+            {/* Filters */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="text-lg">Filters</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <Label>Filter by Department</Label>
+                            <Select value={filterDepartment} onValueChange={setFilterDepartment}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="All departments" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">All Departments</SelectItem>
+                                    {departments.map((dept) => (
+                                        <SelectItem key={dept.id} value={dept.id}>
+                                            {dept.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* Forms List */}
+            <div className="grid gap-4">
+                {forms.length === 0 ? (
+                    <Card>
+                        <CardContent className="text-center py-12">
+                            <FileText className="w-12 h-12 mx-auto text-gray-400 mb-4" />
+                            <h3 className="text-lg font-medium text-gray-600 mb-2">No forms found</h3>
+                            <p className="text-sm text-gray-500 mb-4">
+                                {filterDepartment === "all"
+                                    ? "Get started by creating your first department signup form."
+                                    : "No forms found for this department."}
+                            </p>
+                            <Button onClick={createNewForm}>
+                                <Plus className="w-4 h-4 mr-2" />
+                                Create New Form
+                            </Button>
+                        </CardContent>
+                    </Card>
+                ) : (
+                    forms.map((form) => (
+                        <Card key={form.id} className="hover:shadow-md transition-shadow">
+                            <CardHeader>
+                                <div className="flex justify-between items-start">
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-2">
+                                            <CardTitle className="text-lg">{form.form_name}</CardTitle>
+                                            <Badge variant="outline">
+                                                <Building2 className="w-3 h-3 mr-1" />
+                                                {form.departments?.name || getDepartmentName(form.department_id)}
+                                            </Badge>
+                                        </div>
+                                        {form.form_description && (
+                                            <p className="text-sm text-muted-foreground">{form.form_description}</p>
+                                        )}
+                                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                                            <span>{getFieldCount(form.form_fields)} fields</span>
+                                            <span>Created: {new Date(form.created_at).toLocaleDateString()}</span>
+                                            <span>Updated: {new Date(form.updated_at).toLocaleDateString()}</span>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => editForm(form)}
+                                        >
+                                            <Edit className="w-4 h-4" />
+                                        </Button>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => deleteForm(form.id)}
+                                            className="text-red-600 hover:text-red-700"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            </CardHeader>
+                        </Card>
+                    ))
+                )}
+            </div>
+        </div>
+    );
 };
 
 export default FormManagementTab;

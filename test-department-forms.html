@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Department Forms Migration Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .test-section { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
+        .sql-code { background: #2d2d2d; color: #fff; padding: 15px; border-radius: 5px; overflow-x: auto; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Department Forms Migration Test</h1>
+    
+    <div class="test-section">
+        <h2>📋 Migration Status</h2>
+        <p>This page helps you verify that the department_signup_forms table has been created successfully.</p>
+        <button onclick="runTests()">Run Tests</button>
+        <div id="test-results"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>🔧 Manual Migration Instructions</h2>
+        <p>If the tests fail, follow these steps:</p>
+        <ol>
+            <li>Go to your <a href="https://app.supabase.com" target="_blank">Supabase Dashboard</a></li>
+            <li>Navigate to <strong>SQL Editor</strong></li>
+            <li>Copy the SQL code below:</li>
+        </ol>
+        <div class="sql-code">
+-- Create department_signup_forms table
+CREATE TABLE IF NOT EXISTS public.department_signup_forms (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  department_id UUID NOT NULL REFERENCES public.departments(id) ON DELETE CASCADE,
+  form_name TEXT NOT NULL,
+  form_description TEXT,
+  form_fields JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  UNIQUE(department_id, form_name)
+);
+
+-- Create department_signup_form_submissions table
+CREATE TABLE IF NOT EXISTS public.department_signup_form_submissions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  form_id UUID NOT NULL REFERENCES public.department_signup_forms(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+  submission_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  submitted_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+-- Enable RLS
+ALTER TABLE public.department_signup_forms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.department_signup_form_submissions ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies
+CREATE POLICY "Admins can manage department signup forms"
+  ON public.department_signup_forms FOR ALL
+  USING (has_role(auth.uid(), 'admin'::app_role));
+
+CREATE POLICY "Users can view their department signup forms"
+  ON public.department_signup_forms FOR SELECT
+  USING (
+    department_id IN (
+      SELECT department_id FROM public.profiles WHERE id = auth.uid()
+    )
+  );
+
+CREATE POLICY "Admins can manage all form submissions"
+  ON public.department_signup_form_submissions FOR ALL
+  USING (has_role(auth.uid(), 'admin'::app_role));
+
+CREATE POLICY "Users can view their own submissions"
+  ON public.department_signup_form_submissions FOR SELECT
+  USING (user_id = auth.uid());
+
+CREATE POLICY "Users can create submissions"
+  ON public.department_signup_form_submissions FOR INSERT
+  WITH CHECK (user_id = auth.uid());
+
+-- Create triggers
+CREATE TRIGGER update_department_signup_forms_updated_at
+  BEFORE UPDATE ON public.department_signup_forms
+  FOR EACH ROW
+  EXECUTE FUNCTION public.update_updated_at();
+
+-- Create indexes
+CREATE INDEX idx_department_signup_forms_department_id ON public.department_signup_forms(department_id);
+CREATE INDEX idx_department_signup_forms_form_name ON public.department_signup_forms(form_name);
+CREATE INDEX idx_department_signup_form_submissions_form_id ON public.department_signup_form_submissions(form_id);
+CREATE INDEX idx_department_signup_form_submissions_user_id ON public.department_signup_form_submissions(user_id);
+        </div>
+        <ol start="4">
+            <li>Paste it into the SQL Editor and click <strong>Run</strong></li>
+            <li>Return to this page and run the tests again</li>
+        </ol>
+    </div>
+
+    <div class="test-section">
+        <h2>🎯 Application Test</h2>
+        <p>After successful migration, test the actual application:</p>
+        <button onclick="testApplication()">Test Application</button>
+        <div id="app-test-results"></div>
+    </div>
+
+    <script type="module">
+        // Supabase client configuration
+        const SUPABASE_URL = "https://gajkuuwkanhshoccpxia.supabase.co";
+        const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdhamt1dXdrYW5oc2hvY2NweGlhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk5NTU4MzYsImV4cCI6MjA3NTUzMTgzNn0.HGx4vfbR7-xqW1qIH4Vgr_9l3ZWbpcXReX1zBDzeaP0";
+
+        // Load Supabase client
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+        document.head.appendChild(script);
+
+        window.runTests = async function() {
+            const resultsDiv = document.getElementById('test-results');
+            resultsDiv.innerHTML = '<p>🔄 Running tests...</p>';
+            
+            try {
+                const { createClient } = window.supabase;
+                const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+                
+                // Test 1: Check if table exists
+                const { data, error } = await supabase
+                    .from('department_signup_forms')
+                    .select('count')
+                    .limit(1);
+                
+                if (error) {
+                    if (error.message?.includes('does not exist') || error.code === 'PGRST116') {
+                        resultsDiv.innerHTML = '<p class="error">❌ department_signup_forms table does not exist. Please run the migration above.</p>';
+                        return;
+                    }
+                    resultsDiv.innerHTML = `<p class="error">❌ Error accessing table: ${error.message}</p>`;
+                    return;
+                }
+                
+                resultsDiv.innerHTML = '<p class="success">✅ department_signup_forms table exists and is accessible!</p>';
+                
+                // Test 2: Check departments
+                const { data: depts, error: deptError } = await supabase
+                    .from('departments')
+                    .select('id, name')
+                    .limit(5);
+                
+                if (deptError) {
+                    resultsDiv.innerHTML += `<p class="error">❌ Error loading departments: ${deptError.message}</p>`;
+                } else if (depts && depts.length > 0) {
+                    resultsDiv.innerHTML += `<p class="success">✅ Found ${depts.length} departments: ${depts.map(d => d.name).join(', ')}</p>`;
+                } else {
+                    resultsDiv.innerHTML += '<p class="warning">⚠️ No departments found. You may need to create some first.</p>';
+                }
+                
+            } catch (err) {
+                resultsDiv.innerHTML = `<p class="error">❌ Test failed: ${err.message}</p>`;
+            }
+        };
+
+        window.testApplication = function() {
+            const resultsDiv = document.getElementById('app-test-results');
+            resultsDiv.innerHTML = '<p>🔄 Opening application test...</p>';
+            
+            // Open the application in a new tab
+            window.open('/src/components/dashboard/admin/DepartmentSignupFormBuilder.tsx', '_blank');
+            
+            resultsDiv.innerHTML = `
+                <p class="success">✅ Application opened in new tab</p>
+                <p>Instructions:</p>
+                <ol>
+                    <li>Log in as an admin user</li>
+                    <li>Navigate to the Admin Dashboard</li>
+                    <li>Click on "Department Forms" tab</li>
+                    <li>Select a department from the dropdown</li>
+                    <li>Try creating a new form with some fields</li>
+                    <li>Save the form and verify it works without errors</li>
+                </ol>
+            `;
+        };
+    </script>
+</body>
+</html>
